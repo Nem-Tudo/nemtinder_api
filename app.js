@@ -557,7 +557,6 @@ app.put("/users/@me/matches", middlewares.authorize({ select: "+matches" }, User
 
     }
 
-
 })
 
 app.get("/feed", middlewares.authorize({}, UserSchema), async (req, res) => {
@@ -568,7 +567,7 @@ app.get("/feed", middlewares.authorize({}, UserSchema), async (req, res) => {
         users.unshift(verified);
     }
     if (req.query.user) {
-        const user = await UserSchema.findOne({ id: req.query.user });
+        const user = await UserSchema.findOne({ id: req.query.user }) || await UserSchema.findOne({ username: req.query.user });
         if (user) {
             users.unshift(user);
         }
