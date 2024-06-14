@@ -618,7 +618,7 @@ app.post("/channels/:channelId/messages", middlewares.authorize({}, UserSchema),
 })
 
 app.post("/premiumactive", async (req, res, next) => {
-    const pixcordKey = JSON.parse(req.headers["x-pixcord-key"]);
+    const pixcordKey = req.headers["x-pixcord-key"];
     if (pixcordKey != process.env.PIXCORD_KEY) return res.status(401).json({ message: "Invalid pixcord key" });
 
     const data = JSON.parse(req.headers["x-fields-data"]);
