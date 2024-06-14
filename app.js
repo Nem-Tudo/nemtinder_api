@@ -564,7 +564,7 @@ app.get("/feed", middlewares.authorize({}, UserSchema), async (req, res) => {
     const verifieds = shuffleArray(await UserSchema.find({ id: { $ne: req.user.id }, "matches.matchs": { $nin: [req.user.id] }, flags: { $in: ["VERIFIED"] } }));
 
     for (const verified of verifieds) {
-        users.unshift(verified);
+        users.splice(randomNumber(2, 9), 0, verified);
     }
     if (req.query.user) {
         const user = await UserSchema.findOne({ id: req.query.user }) || await UserSchema.findOne({ username: req.query.user });
@@ -618,6 +618,9 @@ app.post("/channels/:channelId/messages", middlewares.authorize({}, UserSchema),
 })
 
 app.post("/premiumactive", async (req, res, next) => {
+    const pixcordKey = JSON.parse(req.headers["x-pixcord-key"]);
+    if (pixcordKey != process.env.PIXCORD_KEY) return res.status(401).json({ message: "Invalid pixcord key" });
+
     const data = JSON.parse(req.headers["x-fields-data"]);
     const username = data.username;
 
@@ -719,4 +722,8 @@ async function matchsInIdstoMathsInUser(matches) {
         sents: _sents,
         matchs: _matchs,
     }
+}
+
+function randomNumber(min, max) {
+    return Math.floor(Math.random() * (max - min + 1) + min);
 }
