@@ -1,11 +1,14 @@
 const jwt = require('jsonwebtoken');
-module.exports = ({ requiredFlags, blockedFlags, select }, userSchema) => async (req, res, next) => {
+module.exports = ({ requiredFlags, blockedFlags, select, optional }, userSchema) => async (req, res, next) => {
     const authorization = req.headers?.authorization;
 
-    if (!authorization) return res.status(401).json({
-        message: "401: Token not provided"
-    });
+    if (!authorization) {
+        if(optional) return next()
+        return res.status(401).json({
+            message: "401: Token not provided"
+        });
 
+    }
     if (typeof authorization !== 'string') return res.status(401).send({ message: "401: Unauthorized" });
 
     const parts = authorization.split(".")
