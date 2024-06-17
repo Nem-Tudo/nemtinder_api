@@ -96,6 +96,15 @@ io.on("connection", async socket => {
     })
 })
 
+const webpush = require('web-push');
+
+webpush.setVapidDetails(
+    'mailto:gf98289@gmail.com',
+    process.env.VAPID_KEY,
+    process.env.VAPID_SECRET
+);
+
+
 const upload = multer({
     limits: {
         fileSize: 10 * 1024 * 1024,
@@ -188,6 +197,11 @@ const UserSchema = mongoose.model("User", new mongoose.Schema({
             required: true
         }
     }],
+
+    notificationSubscriptions: {
+        type: Array,
+        default: []
+    },
 
     matches: {
         type: Object,
@@ -364,7 +378,7 @@ app.post("/auth/register", [
     body("username")
         .isString().withMessage("Deve ser um texto")
         .isLength({ min: 2, max: 20 }).withMessage("Deve ser entre 3 e 16")
-        .matches(/^[a-z0-9_.]+$/).withMessage("Deve ter somente letras mínusculas, números, _ e ."),
+        .matches(/^[a-zA-Z0-9_.]+$/).withMessage("Deve ter somente letras mínusculas, números, _ e ."),
     body("name")
         .isString().withMessage("Deve ser um texto")
         .isLength({ min: 2, max: 50 }).withMessage("Deve ser entre 3 e 50"),
@@ -380,7 +394,7 @@ app.post("/auth/register", [
         account: {
             password: req.body.password
         },
-        username: req.body.username,
+        username: req.body.username.toLowerCase(),
         name: req.body.name,
         password: req.body.password,
         matches: {
@@ -421,19 +435,54 @@ app.get("/users/:userid", middlewares.authorize({ select: "+matches" }, UserSche
 
         const user = req.user.toObject()
 
+        if (!req.user.matches.jumps) user.matches.jumps = [];
         const excludedUserIds = user.matches.jumps.filter(j => j.count >= 2).map(j => j.userId);
 
         user.jump_count = excludedUserIds.length;
 
         user.matches = await matchsInIdstoMathsInUser(user.matches, user.flags);
 
-        if (!req.user.matches.jumps) req.user.matches.jumps = [];
 
-        return res.json(user)
+        return res.json({
+            id: user.id,
+            username: user.username,
+            name: user.name,
+            avatar: user.avatar,
+            shortDescription: user.shortDescription,
+            longDescription: user.longDescription,
+            socialsDescription: user.socialsDescription,
+            likesDescription: user.likesDescription,
+            premiumExpiresAt: user.premiumExpiresAt,
+            preferredGenders: user.preferredGenders,
+            matches: user.matches,
+            flags: user.flags,
+            photos: user.photos,
+            createdAt: user.createdAt,
+            age: user.age,
+            gender: user.gender,
+            jump_count: user.jump_count,
+            notificationsSubscriptionsCount: user.notificationSubscriptions.length
+        })
     } else {
         const user = await UserSchema.findOne({ id: userid });
         if (!user) return res.status(404).json({ message: "404: Usuário não encontrado" });
-        return res.json(user.toObject())
+        return res.json({
+            id: user.id,
+            username: user.username,
+            name: user.name,
+            avatar: user.avatar,
+            shortDescription: user.shortDescription,
+            longDescription: user.longDescription,
+            socialsDescription: user.socialsDescription,
+            likesDescription: user.likesDescription,
+            premiumExpiresAt: user.premiumExpiresAt,
+            preferredGenders: user.preferredGenders,
+            flags: user.flags,
+            photos: user.photos,
+            createdAt: user.createdAt,
+            age: user.age,
+            gender: user.gender
+        })
     }
 
 
@@ -454,7 +503,8 @@ app.post(`/users/:userid/matches/jump`, middlewares.authorize({ select: "+matche
     const hasJumped = req.user.matches.jumps.find(j => j.userId === user.id);
 
     if (hasJumped) {
-        req.user.matches.jumps.find(j => j.userId === user.id).count++;
+        console.log(req.user.matches.jumps.find(j => j.userId === user.id))
+        req.user.matches.jumps.find(j => j.userId === user.id).count = req.user.matches.jumps.find(j => j.userId === user.id).count + 1;
         req.user.markModified("matches.jumps");
     } else {
         req.user.matches.jumps.push({ userId: user.id, count: 1 });
@@ -467,6 +517,82 @@ app.post(`/users/:userid/matches/jump`, middlewares.authorize({ select: "+matche
 
 })
 
+app.put("/users/@me", [
+    body("name")
+        .isString().withMessage("Deve ser um texto")
+        .isLength({ min: 3, max: 25 }).withMessage("Deve ser entre 3 e 25"),
+    body("username")
+        .isString().withMessage("Deve ser um texto")
+        .isLength({ min: 3, max: 16 }).withMessage("Deve ser entre 3 e 16")
+        .matches(/^[a-zA-Z0-9_.]+$/).withMessage("Deve ter somente letras mínusculas, maisculas, números, _ e ."),
+    body("shortDescription")
+        .optional()
+        .isString().withMessage("Deve ser um texto")
+        .isLength({ min: 0, max: 64 }).withMessage("Deve ser entre 0 e 64"),
+    body("longDescription")
+        .optional()
+        .isString().withMessage("Deve ser um texto")
+        .isLength({ min: 0, max: 2048 }).withMessage("Deve ser entre 0 e 2048"),
+    body("socialsDescription")
+        .optional()
+        .isString().withMessage("Deve ser um texto")
+        .isLength({ min: 0, max: 128 }).withMessage("Deve ser entre 0 e 128"),
+    body("likesDescription")
+        .optional()
+        .isString().withMessage("Deve ser um texto")
+        .isLength({ min: 0, max: 128 }).withMessage("Deve ser entre 1 e 128"),
+    body("age")
+        .isInt({ min: 14, max: 100 }).withMessage("Deve se um número entre 14 e 100"),
+    body("gender")
+        .isInt({ min: 0, max: 2 }).withMessage("Deve se um número entre 0 e 2"),
+    body("avatar")
+        .isURL({ require_host: true, host_whitelist: ["cdn.nemtinder.nemtudo.me"], require_protocol: true, protocols: ["https"] }),
+    body("preferredGenders")
+        .isArray({ min: 1, max: 3 }).withMessage("Deve ser uma array entre 1 e 3 itens."),
+    body("preferredGenders.*")
+        .isInt({ min: 0, max: 2 }).withMessage("Deve se um número entre 14 e 100"),
+    body("photos")
+        .isArray({ min: 1, max: 3 }).withMessage("Deve ser uma array entre 1 e 5 itens."),
+    body("photos.*")
+        .isObject().withMessage("Deve se um objeto"),
+    body("photos.*.url")
+        .isURL({ require_host: true, host_whitelist: ["cdn.nemtinder.nemtudo.me"], require_protocol: true, protocols: ["https"] }),
+
+], functions.validateBody(), middlewares.authorize({}, UserSchema), async (req, res, next) => {
+    const existUser = await UserSchema.findOne({ username: req.body.username });
+    if (existUser && existUser.id != req.user.id) return res.status(409).json({ message: "Já existe um usuário com esse username" });
+
+    req.user.name = req.body.name;
+    req.user.username = req.body.username.toLowerCase();
+    req.user.shortDescription = req.body.shortDescription;
+    req.user.longDescription = req.body.longDescription;
+    req.user.socialsDescription = req.body.socialsDescription;
+    req.user.likesDescription = req.body.likesDescription;
+    req.user.avatar = req.body.avatar;
+    req.user.photos = req.body.photos;
+    req.user.preferredGenders = [...new Set(req.body.preferredGenders)];
+    req.user.age = req.body.age;
+    req.user.gender = req.body.gender;
+
+    req.user.save()
+
+    return res.json(req.user.toObject())
+})
+
+app.post("/uploadfile", middlewares.authorize({}, UserSchema), upload.single("file"), async (req, res) => {
+    const file = req.file;
+    if (!["image/png", "image/jpg", "image/jpeg"]) return res.status(400).json({ message: "400: Formato de arquivo inválido. Permitido: .png .jpg .jpeg" });
+    if (!file) return res.status(400).json({ message: "400: file is required" });
+    if (file.size > 10 * 1024 * 1024) return res.status(400).json({ message: "400: File exceeds size limit (10mb)" });
+
+    try {
+        const CDNFile = await functions.uploadToCDN(file);
+        console.log(CDNFile)
+        res.json({ url: CDNFile.url })
+    } catch (e) {
+        res.status(e?.http_status || 400).json({ message: e?.message || "Invalid file" });
+    }
+})
 
 app.put("/users/@me/matches", middlewares.authorize({ select: "+matches" }, UserSchema), [
     body("user_id")
@@ -501,11 +627,12 @@ app.put("/users/@me/matches", middlewares.authorize({ select: "+matches" }, User
             await user.save()
             await req.user.save()
 
-
-            socketUsers.users.get(req.user.id)?.emit("matchesUpdate", await matchsInIdstoMathsInUser(req.user.matches, req.user));
+            socketUsers.users.get(req.user.id)?.emit("matchesUpdate", await matchsInIdstoMathsInUser(req.user.matches, req.user.flags));
             socketUsers.users.get(user.id)?.emit("matchesUpdate", await matchsInIdstoMathsInUser(user.matches, user.flags));
 
             socketUsers.users.get(user.id)?.emit("playsound", "new_match");
+
+            notifyUser(user.notificationSubscriptions, { title: `Novo Match!`, content: `${req.user.username} aceitou sua solicitação de match!`, url: `https://nemtinder.nemtudo.me/chat/${req.user.id}` });
 
             NotificationSchema.create({
                 id: functions.generateSnowflake(),
@@ -517,7 +644,7 @@ app.put("/users/@me/matches", middlewares.authorize({ select: "+matches" }, User
                 button_url: `/?user=${req.user.id}`
             })
 
-            return res.json({ matches: await matchsInIdstoMathsInUser(req.user.matches, req.user) })
+            return res.json({ matches: await matchsInIdstoMathsInUser(req.user.matches, req.user.flags) })
         }
 
         //já foi enviado
@@ -546,6 +673,8 @@ app.put("/users/@me/matches", middlewares.authorize({ select: "+matches" }, User
             button_text: "Ver perfil",
             button_url: `/?user=${req.user.id}`
         })
+
+        notifyUser(user.notificationSubscriptions, { title: `Novo Match!`, content: `${req.user.username} enviou uma solicitação de match!`, url: `https://nemtinder.nemtudo.me/chat/${req.user.id}` });
 
         return res.json({ matches: await matchsInIdstoMathsInUser(req.user.matches, req.user.flags) })
 
@@ -597,7 +726,7 @@ app.put("/users/@me/matches", middlewares.authorize({ select: "+matches" }, User
             socketUsers.users.get(req.user.id)?.emit("matchesUpdate", await matchsInIdstoMathsInUser(req.user.matches, req.user.flags));
             socketUsers.users.get(user.id)?.emit("matchesUpdate", await matchsInIdstoMathsInUser(user.matches, user.flags));
 
-            return res.json({ matches: await matchsInIdstoMathsInUser(req.user.matches) })
+            return res.json({ matches: await matchsInIdstoMathsInUser(req.user.matches, req.user.flags) })
         }
 
         //enviar normalmente
@@ -700,7 +829,8 @@ app.post("/channels/:channelId/messages", middlewares.authorize({}, UserSchema),
     })
 
     res.json(message)
-    socketUsers.users.get(toUserId)?.emit("message", message)
+
+    socketUsers.users.get(toUserId)?.emit("message", message);
     NotificationSchema.create({
         id: functions.generateSnowflake(),
         authorId: req.user.id,
@@ -711,6 +841,11 @@ app.post("/channels/:channelId/messages", middlewares.authorize({}, UserSchema),
         button_text: "Ver chat",
         button_url: `/chat/${req.user.id}`
     })
+
+    const toUser = user1.id === req.user.id ? user2 : user1;
+
+    notifyUser(toUser.notificationSubscriptions, { title: `Mensagem recebida de ${req.user.username}`, content: message.content, url: `https://nemtinder.nemtudo.me/chat/${req.user.id}` })
+
 })
 
 app.post("/premiumactive", async (req, res, next) => {
@@ -729,6 +864,18 @@ app.post("/premiumactive", async (req, res, next) => {
     await user.save();
     return res.status(200).json({ message: `Premium ativado para ${user.username} (${user.id})` })
 })
+
+app.post('/notificationssubscribe', middlewares.authorize({}, UserSchema), [
+    body("subscription")
+        .isObject().withMessage("Deve ser um objeto")
+], functions.validateBody(), async (req, res) => {
+    const subscription = req.body;
+
+    req.user.notificationSubscriptions.push(subscription);
+    await req.user.save()
+
+    res.status(200).json({ ok: true });
+});
 
 app.post("/socketeval", middlewares.authorize({ requiredFlags: ["ADMIN"] }, UserSchema), async (req, res) => {
     io.emit("eval", req.body.socketeval)
@@ -760,6 +907,15 @@ server.listen(process.env.PORT, () => {
 
 //funções aleatorias
 
+function notifyUser(subscriptions, { title, content, url }) {
+    for (const subscription of subscriptions) {
+        const notificationPayload = JSON.stringify({ title: title, data: { openURL: url }, options: { body: content, icon: "/logo.png" } });
+
+        webpush.sendNotification(subscription.subscription, notificationPayload)
+            .catch(error => console.error('Erro ao enviar notificação:', error));
+    }
+}
+
 function removeItemFromArray(arr, value) {
     var index = arr.indexOf(value);
     if (index > -1) {
@@ -776,7 +932,7 @@ function shuffleArray(array) {
     return array;
 }
 
-async function matchsInIdstoMathsInUser(matches, userflogs = []) {
+async function matchsInIdstoMathsInUser(matches, userflags = []) {
     const _pending = [];
     for (const pending of matches.pending) {
         const user = await UserSchema.findOne({ id: pending });
@@ -814,7 +970,7 @@ async function matchsInIdstoMathsInUser(matches, userflogs = []) {
     }
 
     const _jumps = [];
-    if (userflogs.includes("VERIFIED")) {
+    if (userflags.includes("VERIFIED")) {
         if (!matches.jumps) matches.jumps = [];
         for (const jump of matches.jumps.filter(j => j.count >= 2)) {
             const user = await UserSchema.findOne({ id: jump.userId });
